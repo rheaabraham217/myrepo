@@ -1,0 +1,211 @@
+---
+title: "Lab 1"
+author: "Rhea Abraham, worked with Varsha Murali"
+date: "Due on 02/07 at 11:59 PM"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+**Instructions:** This lab report needs to be professional. Only report relevant and finalized code. Your writing should be concise and void of spelling errors. Use code chunk options to hide unnecessary messages/warnings. Your report should be reproducible. Reports that involve simulations need to have the random seed specified so that simulation results are reproducible. You are allowed to work on this lab assignment in groups of 2-3. You still need to submit an individual lab report if you do work in a group, and you need to list your collaborators. \vspace*{0.5cm}
+
+
+**Question 1** In lecture it was demonstrated that baseball is a game of offense, pitching, and defense with a regression model that considered expected run differential as a function of explanatory variables OPS, WHIP, and FP. Do the following:
+
+ - Fit a similar regression model with runs as the response variable. Report problems with this model. Investigate problematic residuals to discover what went wrong. Fix the problem with this model by adding categorical variable(s) to the list of explanatory variables. Briefly explain what went wrong. 
+ 
+ - We can significantly improve the regression model in the notes through a principled rescaling of OPS, WHIP, and FP. Split the Teams data frame by \texttt{yearID} and, for each year, create variables \texttt{OPSscale = OPS/avgOPS}, \texttt{WHIPscale = avgWHIP/WHIP}, and \texttt{FPscale = FP/avgFP} which require you to first create league average variables \texttt{avgOPS}, \texttt{avgWHIP}, and \texttt{avgFP}. Fit the linear regression model with runs differential as the response and explanatory variables \texttt{OPSscale}, \texttt{WHIPscale}, and \texttt{FPscale}, and report relevant output. Why does this model perform so much better than the model in the notes? Support your answer. 
+
+```{r}
+library(Lahman)
+data(Batting)
+data(Pitching)
+data(Fielding)
+data(Teams)
+
+library(dplyr)
+library(ggplot2)
+library(retrosheet)
+library(baseballr)
+
+
+Teams <- Teams %>%
+  mutate(
+    OBP = (H + BB + HBP) / (AB + BB + HBP + SF),
+    SLG = (H + X2B + (2 * X3B) + (3 * HR)) / AB,
+    OPS = OBP + SLG,
+    WHIP = (BB + H) / (IPouts / 3)
+  )
+
+model1 <- lm(R ~ OPS + WHIP + FP, data = Teams)
+summary(model1)
+
+plot(model1$residuals, main = "Residuals of Initial Model", ylab = "Residuals")
+
+Teams_clean <- Teams %>% filter(complete.cases(OPS, WHIP, FP, R))
+Teams_clean <- Teams_clean %>% mutate(residuals = model1$residuals) %>% arrange(desc(abs(residuals))) %>% head(10)
+print(Teams_clean)
+
+model2 <- lm(R ~ OPS + WHIP + FP + factor(yearID) + factor(lgID), data = Teams)
+summary(model2)
+
+Teams <- Teams %>% group_by(yearID) %>%
+  mutate(
+    avgOPS = mean(OPS, na.rm = TRUE),
+    avgWHIP = mean(WHIP, na.rm = TRUE),
+    avgFP = mean(FP, na.rm = TRUE),
+    OPSscale = OPS / avgOPS,
+    WHIPscale = avgWHIP / WHIP,
+    FPscale = FP / avgFP
+  )
+
+model3 <- lm(R ~ OPSscale + WHIPscale + FPscale, data = Teams)
+summary(model3)
+
+
+
+```
+**Question 2** Choose 3 batters and 3 pitchers that have played in at least 10 seasons and do the following: 
+
+ - Display the seasonal statistics for these players. The following statistics should be included for batters (derivations of unconventional statistics are in parentheses): year, G, AB, R, H, X2B, X3B, HR, RBI, SB, CS, SBpct (SB / (SB + CS)), BB, SO, OBP, SLG, OPS. The following statistics should be included for pitchers: year, W,  L, IPouts, H, ER, HR, BB, HBP, SO, ERA, WHIP, SOper9 (SO / IP * 9), SOperBB (SO / BB). These statistics can be found in or computed from statistics that are found in the \texttt{Batting} and \texttt{Pitching} dataframes in the \texttt{Lahman} package.
+
+ - Create career stat lines for each of the players that you selected. Be careful about how these statistics are calculated.
+ 
+ - Provide a plot for career trajectories for one batting and one pitching statistic of your choice. These are two separate graphics, one for the batters and one for the pitchers. The graphics that you produce should display the trajectories of the 3 batters and the 3 pitchers. Provide interesting commentary on your graphic.
+ 
+```{r}
+
+library(Lahman)
+library(dplyr)
+library(ggplot2)
+
+batters <- Batting %>%
+  group_by(playerID) %>%
+  filter(n_distinct(yearID) >= 10) %>%
+  summarise(total_G = sum(G), total_HR = sum(HR)) %>%
+  arrange(desc(total_HR)) %>%
+  slice(1:3) %>%
+  pull(playerID)
+
+pitchers <- Pitching %>%
+  group_by(playerID) %>%
+  filter(n_distinct(yearID) >= 10) %>%
+  summarise(total_W = sum(W), total_SO = sum(SO)) %>%
+  arrange(desc(total_SO)) %>%
+  slice(1:3) %>%
+  pull(playerID)
+
+batting_stats <- Batting %>%
+  filter(playerID %in% batters) %>%
+  mutate(SBpct = SB / (SB + CS),
+         OBP = (H + BB) / (AB + BB),
+         SLG = (H + X2B + 2 * X3B + 3 * HR) / AB,
+         OPS = OBP + SLG) %>%
+  select(playerID, yearID, G, AB, R, H, X2B, X3B, HR, RBI, SB, CS, SBpct, BB, SO, OBP, SLG, OPS)
+
+pitching_stats <- Pitching %>%
+  filter(playerID %in% pitchers) %>%
+  mutate(ERA = (ER / IPouts) * 27,
+         WHIP = (BB + H) / (IPouts / 3),
+         SOper9 = (SO / (IPouts / 3)) * 9,
+         SOperBB = SO / BB) %>%
+  select(playerID, yearID, W, L, IPouts, H, ER, HR, BB, HBP, SO, ERA, WHIP, SOper9, SOperBB)
+
+career_batting <- batting_stats %>%
+  group_by(playerID) %>%
+  summarise(across(where(is.numeric), sum, na.rm = TRUE))
+
+career_pitching <- pitching_stats %>%
+  group_by(playerID) %>%
+  summarise(across(where(is.numeric), sum, na.rm = TRUE))
+
+batting_plot <- ggplot(batting_stats, aes(x = yearID, y = OPS, color = playerID)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "OPS Career Trajectory of Selected Batters", x = "Year", y = "OPS") +
+  theme_minimal()
+
+pitching_plot <- ggplot(pitching_stats, aes(x = yearID, y = SOper9, color = playerID)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Strikeouts Per 9 Innings Career Trajectory of Selected Pitchers", x = "Year", y = "SO per 9 Innings") +
+  theme_minimal()
+
+print(batting_stats)
+print(pitching_stats)
+print(career_batting)
+print(career_pitching)
+print(batting_plot)
+print(pitching_plot)
+
+```
+**Question 3** Exercise 1.2 in the online version of Analyzing Baseball Data with R. Exercise 2 on page 27 of the textbook.
+
+```{r}
+gibson_1968 <- Pitching %>%
+  filter(playerID == "gibsobo01", yearID == 1968)
+
+
+fraction_completed <- gibson_1968$CG / gibson_1968$GS
+strikeout_to_walk_ratio <- gibson_1968$SO / gibson_1968$BB
+innings_pitched <- gibson_1968$IPouts / 3
+WHIP <- (gibson_1968$BB + gibson_1968$H) / innings_pitched
+
+list(
+  fraction_completed = fraction_completed,
+  strikeout_to_walk_ratio = strikeout_to_walk_ratio,
+  innings_pitched = innings_pitched,
+  WHIP = WHIP
+)
+
+
+```
+
+**Question 4** Exercise 1.3 in the online version of Analyzing Baseball Data with R. Exercise 3 on page 27 of the textbook.
+```{r}
+library(readr)
+library(dplyr)
+
+file_path <- "/Users/Rhea/Desktop/stat430/sp25_stat430_rheaaa2/rhea_labs/lab1/gl1964.txt" 
+
+column_names <- c(
+  "Date", "DoubleHeader", "DayOfWeek", "VisitingTeam", "VisitingTeamLeague",
+  "VisitingTeamGameNumber", "HomeTeam", "HomeTeamLeague", "HomeTeamGameNumber",
+  "VisitorRunsScored", "HomeRunsScore", "LengthInOuts", "DayNight",
+  "CompletionInfo", "ForfeitInfo", "ProtestInfo", "ParkID", "Attendance",
+  "Duration", "VisitorLineScore", "HomeLineScore", "VisitorAB", "VisitorH",
+  "VisitorD", "VisitorT", "VisitorHR", "VisitorRBI", "VisitorSH", "VisitorSF",
+  "VisitorHBP", "VisitorBB", "VisitorIBB", "VisitorK", "VisitorSB",
+  "VisitorCS", "VisitorGDP", "VisitorCI", "VisitorLOB"
+)
+
+game_logs <- read_csv(file_path, col_names = column_names)
+
+game <- game_logs %>%
+  filter(Date == "19640621", VisitingTeam == "PHI", HomeTeam == "NYN")
+
+game_duration <- as.numeric(game$Duration)
+game_hours <- game_duration %/% 60
+game_minutes <- game_duration %% 60
+cat("Game Duration:", game_hours, "hours", game_minutes, "minutes\n")
+
+cat("The attendance value is likely zero due to missing or unrecorded data in the log.\n")
+
+extra_base_hits <- as.numeric(game$VisitorD) + as.numeric(game$VisitorT) + as.numeric(game$VisitorHR)
+cat("Phillies' Extra-Base Hits:", extra_base_hits, "\n")
+
+visitor_hits <- as.numeric(game$VisitorH)
+visitor_walks <- as.numeric(game$VisitorBB)
+visitor_hit_by_pitch <- as.numeric(game$VisitorHBP)
+visitor_at_bats <- as.numeric(game$VisitorAB)
+visitor_sacrifice_flies <- as.numeric(game$VisitorSF)
+
+OBP <- (visitor_hits + visitor_walks + visitor_hit_by_pitch) / (visitor_at_bats + visitor_walks + visitor_hit_by_pitch + visitor_sacrifice_flies)
+cat("Phillies' On-Base Percentage:", round(OBP, 3), "\n")
+
+```
+
+
